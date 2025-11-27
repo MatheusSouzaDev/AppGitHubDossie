@@ -34,7 +34,8 @@ export async function POST(req: Request) {
     };
     if (!markdown) return new Response("markdown required", { status: 400 });
 
-    const md = new MarkdownIt({ html: true, linkify: true });
+    // 1) MD -> HTML (sem recursos externos)
+    const md = new MarkdownIt({ html: true, linkify: false, breaks: false});
     const body = md.render(markdown);
 
     const html = `<!doctype html>
@@ -47,7 +48,9 @@ export async function POST(req: Request) {
   *,*::before,*::after { box-sizing: border-box; }
   body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial; color:#111; }
   h1,h2,h3 { color:#0f172a; margin: 18px 0 10px; }
-  pre { background:#0b1220; color:#e5e7eb; padding:12px; border-radius:8px; white-space:pre-wrap; word-break:break-word; }
+  pre { background:#0b1220; color:#e5e7eb; padding:12px; border-radius:8px;
+  white-space:pre; overflow-x:auto; overflow-wrap:normal; word-break:normal; }
+  code { white-space:inherit; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
   a { color:#0369a1; text-decoration:none; } a:hover { text-decoration:underline; }
   blockquote { border-left:4px solid #e5e7eb; padding-left:10px; color:#374151; }
@@ -96,7 +99,13 @@ export async function POST(req: Request) {
 }
 
 function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]!));
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ]!,
+  );
 }
 function sanitizeFileName(s: string) {
   return s.replace(/[^a-z0-9_\-\.]+/gi, "_");
