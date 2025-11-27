@@ -6,8 +6,8 @@ export type DossierMeta = {
   repo: string;
   description?: string | null;
   defaultBranch?: string | null;
-  languages?: string[];            // ex.: ["TypeScript","SQL"]
-  techStackExtra?: string[];       // ex.: ["Prisma","Shadcn","Stripe"]
+  languages?: string[];      // ex.: ["TypeScript","SQL"]
+  techStackExtra?: string[]; // ex.: ["Prisma","Shadcn","Stripe"]
 };
 
 export type FileOut = { path: string; content: string };
@@ -16,8 +16,8 @@ export function buildDossierMarkdown(
   meta: DossierMeta,
   files: FileOut[],
   commitsReviewed?: CommitReview[],
-  allPathsFlat?: string[],         // lista “flat” de paths para a árvore
-  packageJsonSummary?: {           // opcional: resumo do package.json
+  allPathsFlat?: string[], // lista “flat” de paths para a árvore
+  packageJsonSummary?: {   // opcional: resumo do package.json
     name?: string;
     version?: string;
     dependencies?: Record<string, string>;
@@ -32,9 +32,17 @@ export function buildDossierMarkdown(
   const treeText = buildAsciiTree(pathsForTree);
 
   // 3. Arquivos selecionados
-  const filesSections = files.map((f, i) =>
-    `### ${i + 1}. ${f.path}\n\n<a id="${slug(f.path)}"></a>\n\n\`\`\`\n${f.content}\n\`\`\`\n`
-  ).join("\n");
+  const filesSections = files
+    .map((f, i) => {
+      const lang = guessLang(f.path); // opcional para highlight
+      return [
+        `### ${i + 1}. ${f.path}`,
+        `<a id="${slug(f.path)}"></a>`,
+        fence(lang, f.content),
+        "",
+      ].join("\n\n");
+    })
+    .join("\n");
 
   // 4. Commits (se existirem)
   const commitsSection = commitsReviewed && commitsReviewed.length
@@ -48,7 +56,7 @@ export function buildDossierMarkdown(
 
   // 6. .env.example
   const envBlock = envExampleContent
-    ? `\n\`\`\`dotenv\n${envExampleContent}\n\`\`\`\n`
+    ? fence("dotenv", envExampleContent)
     : "_Não localizado/selecionado._";
 
   // 7. Tech stack base + extras
@@ -98,9 +106,7 @@ export function buildDossierMarkdown(
 
 ## 2. Estrutura de Pastas e Arquivos  <a id="estrutura-de-pastas-e-arquivos"></a>
 
-\`\`\`
-${treeText || "—"}
-\`\`\`
+${fence("text", treeText || "—")}
 
 ---
 
@@ -137,7 +143,6 @@ ${pkgBlock}
 ## 8. Dúvidas, Pontos Críticos ou Melhorias  <a id="duvidas-pontos-criticos-ou-melhorias"></a>
 
 ${doubtsMerged}
-
 `;
 }
 
@@ -154,7 +159,6 @@ type TreeNode = { children: Map<string, TreeNode> };
 export function buildAsciiTree(paths: string[]): string {
   if (!paths.length) return "";
 
-  // raiz tipada
   const root: TreeNode = { children: new Map<string, TreeNode>() };
 
   // monta um trie
@@ -190,7 +194,6 @@ export function buildAsciiTree(paths: string[]): string {
   print(root, "");
   return lines.join("\n");
 }
-
 
 function renderCommits(commits: CommitReview[]) {
   const header = `| Data | SHA | Mensagem | +/- | Arquivos | Flags |
@@ -233,7 +236,6 @@ function renderPackageSummary(pkg?: {
 }
 
 function renderDoubtsMerged() {
-  // Baseado no item 8 do Modelo_SaaS + seu bloco de dúvidas
   const items = [
     "Melhorar organização dos arquivos e remover duplicações.",
     "Refatorar componentes críticos e padronizar padrões.",
@@ -248,4 +250,47 @@ function renderDoubtsMerged() {
     "Reforçar boas práticas: commits granulares e descritivos.",
   ];
   return items.map(i => `- ${i}`).join("\n");
+}
+
+/** Cerca conteúdo com bloco de código sem precisar escapar crases */
+function fence(lang: string | undefined, content: string) {
+  const tag = lang ? String(lang) : "";
+  return ["```" + tag, content, "```"].join("\n");
+}
+
+/** Heurística simples para linguagem do bloco (opcional) */
+function guessLang(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  switch (ext) {
+    case "ts":
+    case "mts":
+    case "cts":
+      return "ts";
+    case "tsx":
+      return "tsx";
+    case "js":
+    case "mjs":
+    case "cjs":
+      return "js";
+    case "jsx":
+      return "jsx";
+    case "json":
+      return "json";
+    case "md":
+    case "markdown":
+      return "md";
+    case "yml":
+    case "yaml":
+      return "yaml";
+    case "env":
+      return "dotenv";
+    case "css":
+      return "css";
+    case "html":
+      return "html";
+    case "sql":
+      return "sql";
+    default:
+      return ""; // sem highlight
+  }
 }
