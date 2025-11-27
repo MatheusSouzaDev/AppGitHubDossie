@@ -1,30 +1,8 @@
+import { existsSync } from "node:fs";
 import MarkdownIt from "markdown-it";
-import chromium from "@sparticuz/chromium";
-import puppeteer from "puppeteer-core";
-import path from "path";
-import fs from "fs";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-// Ajustes recomendados pelo Sparticuz
-const _chromium = chromium as unknown as {
-  setHeadlessMode?: (v: boolean) => void;
-  setGraphicsMode?: (v: boolean) => void;
-  setBrotliPath?: (p: string) => void;
-};
-if (typeof _chromium.setHeadlessMode === "function") _chromium.setHeadlessMode(true);
-if (typeof _chromium.setGraphicsMode === "function") _chromium.setGraphicsMode(false);
-
-// Corrige o caminho dos .br (brotli) na Vercel
-try {
-   // raiz do pacote @sparticuz/chromium dentro do bundle
-  const pkgRoot = path.dirname(require.resolve("@sparticuz/chromium/package.json"));
-  const brotliDir = path.join(pkgRoot, "bin"); // .../node_modules/@sparticuz/chromium/bin
-  if (typeof _chromium.setBrotliPath === "function" && fs.existsSync(brotliDir)) {
-    _chromium.setBrotliPath(brotliDir);
-  }
-} catch { /* ignore */ }
 
 export async function POST(req: Request) {
   try {
@@ -35,7 +13,7 @@ export async function POST(req: Request) {
     if (!markdown) return new Response("markdown required", { status: 400 });
 
     // 1) MD -> HTML (sem recursos externos)
-    const md = new MarkdownIt({ html: true, linkify: false, breaks: false});
+    const md = new MarkdownIt({ html: true, linkify: false, breaks: false });
     const body = md.render(markdown);
 
     const html = `<!doctype html>
@@ -63,10 +41,10 @@ export async function POST(req: Request) {
 <body>${body}</body>
 </html>`;
 
-    const executablePath = await chromium.executablePath();
+    const { executablePath, args, puppeteer } = await getBrowserLauncher();
 
     const browser = await puppeteer.launch({
-      args: chromium.args,
+      args,
       executablePath,
       headless: true, // NÃO usar chromium.headless
     });
@@ -96,6 +74,71 @@ export async function POST(req: Request) {
     console.error("[/api/export/pdf] ERROR:", msg);
     return new Response(`PDF error: ${msg}`, { status: 500 });
   }
+}
+
+async function getBrowserLauncher() {
+  const localPuppeteer = await resolveLocalPuppeteer();
+  if (localPuppeteer) return localPuppeteer;
+
+  const envExecutable = process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (envExecutable && existsSync(envExecutable)) {
+    const puppeteer = (await import("puppeteer-core")).default;
+    return { puppeteer, executablePath: envExecutable, args: [] };
+  }
+
+  if (!shouldUseLambdaChromium()) {
+    throw new Error(
+      "Nenhum navegador foi encontrado. Instale o Chrome ou defina PUPPETEER_EXECUTABLE_PATH.",
+    );
+  }
+
+  const chromiumModule = await import("@sparticuz/chromium");
+  const chromium = chromiumModule.default ?? chromiumModule;
+
+  const chromiumTuner = chromium as unknown as {
+    setHeadlessMode?: (v: boolean) => void;
+    setGraphicsMode?: (v: boolean) => void;
+    setBrotliPath?: (p: string) => void;
+  };
+  if (typeof chromiumTuner.setHeadlessMode === "function")
+    chromiumTuner.setHeadlessMode(true);
+  if (typeof chromiumTuner.setGraphicsMode === "function")
+    chromiumTuner.setGraphicsMode(false);
+
+  const executablePath = await chromium.executablePath();
+  if (!executablePath || !existsSync(executablePath)) {
+    throw new Error(
+      "Nenhum executável do Chromium foi encontrado para gerar o PDF.",
+    );
+  }
+
+  const puppeteer = (await import("puppeteer-core")).default;
+  return { puppeteer, executablePath, args: chromium.args };
+}
+
+async function resolveLocalPuppeteer() {
+  try {
+    const puppeteer = (await import("puppeteer")).default;
+    const executablePath = puppeteer.executablePath();
+    if (executablePath && existsSync(executablePath)) {
+      return { puppeteer, executablePath, args: [] };
+    }
+  } catch (error) {
+    console.warn("[pdf] Puppeteer padrão não disponível:", error);
+  }
+
+  return null;
+}
+
+function shouldUseLambdaChromium() {
+  if (process.platform !== "linux") return false;
+
+  return Boolean(
+    process.env.VERCEL ||
+      process.env.AWS_REGION ||
+      process.env.AWS_EXECUTION_ENV ||
+      process.env.LAMBDA_TASK_ROOT,
+  );
 }
 
 function escapeHtml(s: string) {
